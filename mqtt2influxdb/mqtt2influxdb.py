@@ -18,6 +18,12 @@ import py_expression_eval
 import pycron
 from .expr import variable_to_jsonpath
 from .config import json_path
+import influxdb_client
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import SYNCHRONOUS
+import sparkplug_b as sparkplug
+from sparkplug_b import *
+
 
 
 class Mqtt2InfluxDB:
@@ -25,6 +31,7 @@ class Mqtt2InfluxDB:
     def __init__(self, config):
 
         self._points = config['points']
+        self._pointsSpb = config['pointsSpb']
         self._config = config
 
         self._influxdb = influxdb.InfluxDBClient(config['influxdb']['host'],
@@ -32,6 +39,11 @@ class Mqtt2InfluxDB:
                                                  config['influxdb'].get('username', 'root'),
                                                  config['influxdb'].get('password', 'root'),
                                                  ssl=config['influxdb'].get('ssl', False))
+
+        self._influxdb2 = InfluxDBClient(url=config['influxdb']['url'], token=config['influxdb']['token'], org="Libre")
+        self._write_api = self._influxdb2.write_api(write_options=SYNCHRONOUS)
+
+        self._bucket = config['influxdb']['bucket']
 
         self._mqtt = paho.mqtt.client.Client()
 
@@ -49,14 +61,14 @@ class Mqtt2InfluxDB:
         self._mqtt.on_message = self._on_mqtt_message
 
     def run(self):
-        logging.debug('InfluxDB create database %s', self._config['influxdb']['database'])
-        self._influxdb.create_database(self._config['influxdb']['database'])
-        self._influxdb.switch_database(self._config['influxdb']['database'])
+        # logging.debug('InfluxDB create database %s', self._config['influxdb']['database'])
+        # self._influxdb.create_database(self._config['influxdb']['database'])
+        # self._influxdb.switch_database(self._config['influxdb']['database'])
 
-        for point in self._points:
-            if 'database' in point:
-                logging.debug('InfluxDB create database %s', point['database'])
-                self._influxdb.create_database(point['database'])
+        # for point in self._points:
+        #     if 'database' in point:
+        #         logging.debug('InfluxDB create database %s', point['database'])
+        #         self._influxdb.create_database(point['database'])
 
         logging.info('MQTT broker host: %s, port: %d, use tls: %s',
                      self._config['mqtt']['host'],
@@ -82,6 +94,13 @@ class Mqtt2InfluxDB:
             for point in self._points:
                 logging.info('subscribe %s', point['topic'])
                 client.subscribe(point['topic'])
+            for pointSpb in self._pointsSpb:
+                topicNode = "spBv1.0/" + pointSpb.groupId + "/NCMD/" + pointSpb.nodeName + "/#"
+                topicDevice = "spBv1.0/" + pointSpb.groupId + "/DCMD/" + pointSpb.nodeName + "/#"
+                logging.info('subscribe Spb %s', topicNode)
+                client.subscribe(topicNode)
+                logging.info('subscribe Spb %s', topicDevice)
+                client.subscribe(topicDevice)
 
     def _on_mqtt_disconnect(self, client, userdata, rc):
         logging.info('Disconnect from MQTT broker with code %s', rc)
@@ -89,117 +108,158 @@ class Mqtt2InfluxDB:
     def _on_mqtt_message(self, client, userdata, message):
         logging.debug('mqtt_on_message %s %s', message.topic, message.payload)
 
+        tokens = message.topic.split("/")
+
+        if tokens[0] == "spBv1.0" and (tokens[2] == "DCMD" or tokens[2] == "NCMD") :
+            for pointSpb in self._pointsSpb:
+                self.manageSpb(message, pointSpb)
+        else:
+            for point in self._points:
+                self.manageStdMqtt(message, point)
+
+    # path: /area/eqpt_id/1_INFORMATIONS/2_VALUE_CHAIN/4_OPERATION_RESPONSE/1_ACTUAL_OUTPUT/1_GOODS
+    # path: /area/eqpt_id/4_BEHAVIORS/2_STATES
+
+    # target:   /area/equipments
+    #           /area/it
+    #           /area/organization
+    #           /area/equipment/eqpt_id/2_STRUCTURE/2_DIGITAL/Platform/...
+    #           /area/equipment/eqpt_id/2_STRUCTURE/2_DIGITAL/Platform/...
+    #           /area/equipment/eqpt_id/2_STRUCTURE/1_PHYSICAL/PC_1/...
+
+    def manageSpb(self, message, point):
+        inboundPayload = sparkplug_b_pb2.Payload()
+        inboundPayload.ParseFromString(message.payload)
+
+        for metric in inboundPayload.metrics:
+            tokens = metric.name.split("/")
+
+            p = Point(tokens[-1])
+            p.time(metric.timestamp, WritePrecision.MS)
+            p.field("value", getMetricValue(metric))
+
+            p.tag("site", point.groupId)
+            p.tag("area", point.nodeName)
+            p.tag("equipment", tokens[1])
+
+            for i in range(2, len(tokens) - 1):
+                p.tag("lvl" + i, tokens[i])            
+
+            self._write_api.write(bucket=self._bucket, record=p)         
+
+
+    def manageStdMqtt(self, message, point):
+
         msg = None
 
-        for point in self._points:
+        if topic_matches_sub(point['topic'], message.topic):
+            if not msg:
+                payload = message.payload.decode('utf-8')
 
-            if topic_matches_sub(point['topic'], message.topic):
-                if not msg:
-                    payload = message.payload.decode('utf-8')
-
-                    if payload == '':
-                        payload = 'null'
-                    try:
-                        payload = json.loads(payload)
-                    except Exception as e:
-                        logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
-                        return
-
-                    msg = {
-                        "topic": message.topic.split('/'),
-                        "payload": payload,
-                        "timestamp": message.timestamp,
-                        "qos": message.qos
-                    }
-                if 'schedule' in point:
-                    # check if current time is valid in schedule
-                    if not pycron.is_now(point['schedule']):
-                        logging.info('Skipping %s due to schedule %s' % (message.topic, point['schedule']))
-                        continue
-
-                measurement = self._get_value_from_str_or_JSONPath(point['measurement'], msg)
-                if measurement is None:
-                    logging.warning('unknown measurement')
+                if payload == '':
+                    payload = 'null'
+                try:
+                    payload = json.loads(payload)
+                except Exception as e:
+                    logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
                     return
 
-                record = {'measurement': measurement,
-                          'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-                          'tags': {},
-                          'fields': {}}
+                msg = {
+                    "topic": message.topic.split('/'),
+                    "payload": payload,
+                    "timestamp": message.timestamp,
+                    "qos": message.qos
+                }
+            if 'schedule' in point:
+                # check if current time is valid in schedule
+                if not pycron.is_now(point['schedule']):
+                    logging.info('Skipping %s due to schedule %s' % (message.topic, point['schedule']))
+                    return
 
-                if 'base64decode' in self._config:
-                    data = self._get_value_from_str_or_JSONPath(self._config['base64decode']["source"], msg)
-                    dataDecoded = base64.b64decode(data)
-                    msg.update({"base64decoded": {self._config['base64decode']["target"]: {"raw": dataDecoded}}})
-                    dataDecoded = dataDecoded.hex()
-                    msg.update({"base64decoded": {self._config['base64decode']["target"]: {"hex": dataDecoded}}})
+            measurement = self._get_value_from_str_or_JSONPath(point['measurement'], msg)
+            if measurement is None:
+                logging.warning('unknown measurement')
+                return
 
-                if 'fields' in point:
+            record = {'measurement': measurement,
+                        'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                        'tags': {},
+                        'fields': {}}
 
-                    if isinstance(point['fields'], jsonpath_ng.JSONPath):
-                        record['fields'] = self._get_value_from_str_or_JSONPath(point['fields'], msg)
+            if 'base64decode' in self._config:
+                data = self._get_value_from_str_or_JSONPath(self._config['base64decode']["source"], msg)
+                dataDecoded = base64.b64decode(data)
+                msg.update({"base64decoded": {self._config['base64decode']["target"]: {"raw": dataDecoded}}})
+                dataDecoded = dataDecoded.hex()
+                msg.update({"base64decoded": {self._config['base64decode']["target"]: {"hex": dataDecoded}}})
 
-                    else:
-                        for key in point['fields']:
-                            if isinstance(point['fields'][key], dict):
-                                val = self._get_value_from_str_or_JSONPath(point['fields'][key]['value'], msg)
-                                convFunc = getattr(builtins, point['fields'][key]['type'], None)
-                                if val is None:
-                                    continue
-                                if convFunc:
-                                    try:
-                                        val = convFunc(val)
-                                    except ValueError:
-                                        val = None
-                                        logging.warning('invalid conversion function key')
-                            else:
-                                val = self._get_value_from_str_or_JSONPath(point['fields'][key], msg)
-                                if key == 'value':
-                                    if isinstance(val, bool):
-                                        if 'type' in point['fields'] and point['fields']['type'] == 'booltoint':
-                                            val = int(val)
-                                elif key == 'type':
-                                    if val == 'booltoint':
-                                        val = 'int'
+            if 'fields' in point:
+
+                if isinstance(point['fields'], jsonpath_ng.JSONPath):
+                    record['fields'] = self._get_value_from_str_or_JSONPath(point['fields'], msg)
+
+                else:
+                    for key in point['fields']:
+                        if isinstance(point['fields'][key], dict):
+                            val = self._get_value_from_str_or_JSONPath(point['fields'][key]['value'], msg)
+                            convFunc = getattr(builtins, point['fields'][key]['type'], None)
                             if val is None:
-                                logging.warning('Unable to get value for %s' % point['fields'][key])
                                 continue
-                            record['fields'][key] = val
-                        if len(record['fields']) != len(point['fields']):
-                            logging.warning('different number of fields')
-
-                if not record['fields']:
-                    logging.warning('empty fields')
-                    return
-
-                if 'tags' in point:
-                    for key in point['tags']:
-                        val = self._get_value_from_str_or_JSONPath(point['tags'][key], msg)
+                            if convFunc:
+                                try:
+                                    val = convFunc(val)
+                                except ValueError:
+                                    val = None
+                                    logging.warning('invalid conversion function key')
+                        else:
+                            val = self._get_value_from_str_or_JSONPath(point['fields'][key], msg)
+                            if key == 'value':
+                                if isinstance(val, bool):
+                                    if 'type' in point['fields'] and point['fields']['type'] == 'booltoint':
+                                        val = int(val)
+                            elif key == 'type':
+                                if val == 'booltoint':
+                                    val = 'int'
                         if val is None:
-                            logging.warning('Unable to get value for tag %s' % point['tags'][key])
+                            logging.warning('Unable to get value for %s' % point['fields'][key])
                             continue
-                        record['tags'][key] = val
+                        record['fields'][key] = val
+                    if len(record['fields']) != len(point['fields']):
+                        logging.warning('different number of fields')
 
-                    if len(record['tags']) != len(point['tags']):
-                        logging.warning('different number of tags')
+            if not record['fields']:
+                logging.warning('empty fields')
+                return
 
-                logging.debug('influxdb write %s', record)
+            if 'tags' in point:
+                for key in point['tags']:
+                    val = self._get_value_from_str_or_JSONPath(point['tags'][key], msg)
+                    if val is None:
+                        logging.warning('Unable to get value for tag %s' % point['tags'][key])
+                        continue
+                    record['tags'][key] = val
 
-                self._influxdb.write_points([record], database=point.get('database', None))
+                if len(record['tags']) != len(point['tags']):
+                    logging.warning('different number of tags')
 
-                if 'http' in self._config:
-                    http_record = {}
-                    for key in point['httpcontent']:
-                        val = self._get_value_from_str_or_JSONPath(point['httpcontent'][key], msg)
-                        if val is None:
-                            continue
-                        http_record.update({key: val})
+            logging.debug('influxdb write %s', record)
 
-                    action = getattr(requests, self._config['http']['action'], None)
-                    if action:
-                        r = action(url=self._config['http']['destination'], data=http_record, auth=HTTPBasicAuth(self._config['http']['username'], self._config['http']['password']))
-                    else:
-                        logging.error("Invalid HTTP method key!")
+            self._influxdb.write_points([record], database=point.get('database', None))
+
+            if 'http' in self._config:
+                http_record = {}
+                for key in point['httpcontent']:
+                    val = self._get_value_from_str_or_JSONPath(point['httpcontent'][key], msg)
+                    if val is None:
+                        continue
+                    http_record.update({key: val})
+
+                action = getattr(requests, self._config['http']['action'], None)
+                if action:
+                    r = action(url=self._config['http']['destination'], data=http_record, auth=HTTPBasicAuth(self._config['http']['username'], self._config['http']['password']))
+                else:
+                    logging.error("Invalid HTTP method key!")
+
 
     def _get_value_from_str_or_JSONPath(self, param, msg):
         if isinstance(param, str):
