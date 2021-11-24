@@ -108,11 +108,18 @@ class Mqtt2InfluxDB:
 
                     if payload == '':
                         payload = 'null'
-                    try:
-                        payload = json.loads(payload)
-                    except Exception as e:
-                        logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
-                        return
+                    # try:
+                    #     payload = json.loads(payload)
+                    # except Exception as e:
+                    #     logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
+                    #     return
+
+                    if point['type'] == 'float':
+                        payload = float(payload)
+                    elif point['type'] == 'int':
+                        payload = int(payload)
+                    elif point['type'] == 'boolean':
+                        payload = (payload == 'True')
 
                     msg = {
                         "topic": message.topic.split('/'),
@@ -199,7 +206,13 @@ class Mqtt2InfluxDB:
 
                 logging.debug('influxdb write %s', record)
 
-                self._write_api.write(bucket=self._bucket, record=p)                
+                line_protocol = p.to_line_protocol()
+                print(line_protocol)
+
+                try:
+                    self._write_api.write(bucket=self._bucket, record=p)
+                except Exception as e:
+                    print(e)
 
                 #self._influxdb.write_points([record], database=point.get('database', None))
 
