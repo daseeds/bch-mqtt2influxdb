@@ -164,17 +164,12 @@ class Mqtt2InfluxDB:
                     logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
                     return
 
-                msg = {
-                    "topic": message.topic.split('/'),
-                    "payload": payload,
-                    "timestamp": message.timestamp,
-                    "qos": message.qos
-                }
-            if 'schedule' in point:
-                # check if current time is valid in schedule
-                if not pycron.is_now(point['schedule']):
-                    logging.info('Skipping %s due to schedule %s' % (message.topic, point['schedule']))
-                    return
+                record = {'measurement': measurement,
+                          'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                          'tags': {},
+                          'fields': {}}
+                
+                p = Point(measurement)
 
             measurement = self._get_value_from_str_or_JSONPath(point['measurement'], msg)
             if measurement is None:
@@ -194,7 +189,6 @@ class Mqtt2InfluxDB:
                 msg.update({"base64decoded": {self._config['base64decode']["target"]: {"hex": dataDecoded}}})
 
             if 'fields' in point:
-
                 if isinstance(point['fields'], jsonpath_ng.JSONPath):
                     record['fields'] = self._get_value_from_str_or_JSONPath(point['fields'], msg)
 
@@ -224,6 +218,7 @@ class Mqtt2InfluxDB:
                             logging.warning('Unable to get value for %s' % point['fields'][key])
                             continue
                         record['fields'][key] = val
+                        p.field(key, val)
                     if len(record['fields']) != len(point['fields']):
                         logging.warning('different number of fields')
 
@@ -238,13 +233,16 @@ class Mqtt2InfluxDB:
                         logging.warning('Unable to get value for tag %s' % point['tags'][key])
                         continue
                     record['tags'][key] = val
+                    p.tag(key, val)
 
                 if len(record['tags']) != len(point['tags']):
                     logging.warning('different number of tags')
 
             logging.debug('influxdb write %s', record)
 
-            self._influxdb.write_points([record], database=point.get('database', None))
+            self._write_api.write(bucket=self._bucket, record=p)                
+
+            #self._influxdb.write_points([record], database=point.get('database', None))
 
             if 'http' in self._config:
                 http_record = {}
