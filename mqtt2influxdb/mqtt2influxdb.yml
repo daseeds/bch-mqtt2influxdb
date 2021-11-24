@@ -1,0 +1,111 @@
+mqtt:
+  host: 127.0.0.1
+  port: 8883
+  username: supervisor
+  password: supervisor
+
+influxdb:
+  host: 127.0.0.1
+  port: 8086
+  url: http://127.0.0.1:8086
+  bucket: UNS
+  database: UNS
+  username: bridge
+  password: bridgebridge
+  token: wWOZ_ahoRIBREPYmWpYHNyrACZziKU1bVkBpmbnOwiRxOW0XK_62tc2XkD42hT8jLOV2gFMy39nhI3Ua5u82Hg==
+
+points:
+  - measurement: oee
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/OEE
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: float
+  - measurement: oeequality
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/OEEquality
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: float
+  - measurement: oeeperformance
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/OEEperformance
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: float
+  - measurement: oeeavailability
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/OEEavailability
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: float
+  - measurement: rate
+    topic: $SYS/monitor/connectorManager/MessagesPublishReceivedRate
+    fields:
+      value: $.payload
+    tags:
+      site: ASLS-LACIOTAT
+      workshop: NIMBUS
+      equipment: vgerndvud2587.gemalto.com
+      software: JoramMQ
+      metric: MessagesPublishReceivedRate
+    type: float
+  - measurement: rate
+    topic: $SYS/monitor/connectorManager/MessagesPublishSentRate
+    fields:
+      value: $.payload
+    tags:
+      site: ASLS-LACIOTAT
+      workshop: NIMBUS
+      equipment: vgerndvud2587.gemalto.com
+      software: JoramMQ
+      metric: MessagesPublishSentRate
+    type: float
+  - measurement: stateRunning
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/stateRunning
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: boolean
+  - measurement: state
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/currentState
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: string
+  - measurement: qtyGood
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/1_INFORMATIONS/2_VALUE_CHAIN/4_OPERATION_RESPONSE/1_ACTUAL_OUTPUT/1_GOODS/quantity
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: int    
+  - measurement: instantSpeed
+    topic: ASF-THALES-DIS/3_STRUCTURE/1_PHYSICAL_ELEMENTS/+/+/+/4_BEHAVIORS/2_STATES/stateActualInstantSpeed
+    fields:
+      value: $.payload
+    tags:
+      site: $.topic[3]
+      workshop: $.topic[4]
+      equipment: $.topic[5]
+    type: float    
