@@ -21,8 +21,7 @@ from .config import json_path
 import influxdb_client
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
-import sparkplug_b as sparkplug
-from sparkplug_b import *
+from .sparkplug_b import *
 
 
 
@@ -95,8 +94,8 @@ class Mqtt2InfluxDB:
                 logging.info('subscribe %s', point['topic'])
                 client.subscribe(point['topic'])
             for pointSpb in self._pointsSpb:
-                topicNode = "spBv1.0/" + pointSpb.groupId + "/NCMD/" + pointSpb.nodeName + "/#"
-                topicDevice = "spBv1.0/" + pointSpb.groupId + "/DCMD/" + pointSpb.nodeName + "/#"
+                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/NCMD/" + pointSpb["nodeName"] + "/#"
+                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/DCMD/" + pointSpb["nodeName"] + "/#"
                 logging.info('subscribe Spb %s', topicNode)
                 client.subscribe(topicNode)
                 logging.info('subscribe Spb %s', topicDevice)
