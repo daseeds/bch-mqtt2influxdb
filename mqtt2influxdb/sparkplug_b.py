@@ -11,6 +11,7 @@
 # *   Cirrus Link Solutions - initial implementation
 # ********************************************************************************/
 #import sparkplug_b_pb2
+from . import sparkplug_b_pb2
 import time
 from .sparkplug_b_pb2 import Payload
 

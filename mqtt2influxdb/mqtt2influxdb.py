@@ -25,11 +25,14 @@ from .sparkplug_b import *
 
 
 
+
 class Mqtt2InfluxDB:
 
     def __init__(self, config):
 
-        self._points = config['points']
+        self._points = None
+        if 'points' in config:
+            self._points = config['points']
         self._pointsSpb = config['pointsSpb']
         self._config = config
 
@@ -90,12 +93,13 @@ class Mqtt2InfluxDB:
             logging.error('Connection refused from reason: %s', lut.get(rc, 'unknown code'))
 
         if rc == paho.mqtt.client.CONNACK_ACCEPTED:
-            for point in self._points:
-                logging.info('subscribe %s', point['topic'])
-                client.subscribe(point['topic'])
+            if self._points:
+                for point in self._points:
+                    logging.info('subscribe %s', point['topic'])
+                    client.subscribe(point['topic'])
             for pointSpb in self._pointsSpb:
-                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/NCMD/" + pointSpb["nodeName"] + "/#"
-                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/DCMD/" + pointSpb["nodeName"] + "/#"
+                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/NDATA/" + pointSpb["nodeName"] + "/#"
+                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/DDATA/" + pointSpb["nodeName"] + "/#"
                 logging.info('subscribe Spb %s', topicNode)
                 client.subscribe(topicNode)
                 logging.info('subscribe Spb %s', topicDevice)
@@ -109,7 +113,7 @@ class Mqtt2InfluxDB:
 
         tokens = message.topic.split("/")
 
-        if tokens[0] == "spBv1.0" and (tokens[2] == "DCMD" or tokens[2] == "NCMD") :
+        if tokens[0] == "spBv1.0" and (tokens[2] == "DDATA" or tokens[2] == "NDATA") :
             for pointSpb in self._pointsSpb:
                 self.manageSpb(message, pointSpb)
         else:
@@ -137,13 +141,15 @@ class Mqtt2InfluxDB:
             p.time(metric.timestamp, WritePrecision.MS)
             p.field("value", getMetricValue(metric))
 
-            p.tag("site", point.groupId)
-            p.tag("area", point.nodeName)
-            p.tag("equipment", tokens[1])
+            p.tag("site", point["groupId"])
+            p.tag("area", point["nodeName"])
+            p.tag("equipment", tokens[0])
 
-            for i in range(2, len(tokens) - 1):
-                p.tag("lvl" + i, tokens[i])            
+            for i in range(1, len(tokens) - 1):
+                p.tag("lvl" + str(i), tokens[i])            
 
+            line_protocol = p.to_line_protocol()
+            print(line_protocol)
             self._write_api.write(bucket=self._bucket, record=p)         
 
 

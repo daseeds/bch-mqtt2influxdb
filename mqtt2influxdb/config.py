@@ -91,7 +91,7 @@ schema = Schema({
         'source': And(str, len, Use(str_or_jsonPath)),
         'target': And(str, len)
     },
-    'points': [{
+    Optional('points'): [{
         'measurement': And(str, len, Use(str_or_jsonPath)),
         'topic': And(str, len),
         Optional('type'): And(str, len),
