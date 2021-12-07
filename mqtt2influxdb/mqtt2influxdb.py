@@ -43,7 +43,7 @@ class Mqtt2InfluxDB:
                                                  ssl=config['influxdb'].get('ssl', False))
 
         self._influxdb2 = InfluxDBClient(url=config['influxdb']['url'], token=config['influxdb']['token'], org="Libre")
-        self._write_api = self._influxdb2.write_api(write_options=SYNCHRONOUS)
+        self._write_api = self._influxdb2.write_api(write_options=SYNCHRONOUS,batch_size=8, flush_interval=8)
 
         self._bucket = config['influxdb']['bucket']
 
@@ -98,8 +98,8 @@ class Mqtt2InfluxDB:
                     logging.info('subscribe %s', point['topic'])
                     client.subscribe(point['topic'])
             for pointSpb in self._pointsSpb:
-                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/NDATA/" + pointSpb["nodeName"] + "/#"
-                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/DDATA/" + pointSpb["nodeName"] + "/#"
+                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
+                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
                 logging.info('subscribe Spb %s', topicNode)
                 client.subscribe(topicNode)
                 logging.info('subscribe Spb %s', topicDevice)
@@ -113,15 +113,16 @@ class Mqtt2InfluxDB:
 
         tokens = message.topic.split("/")
 
-        if tokens[0] == "spBv1.0" and (tokens[2] == "DDATA" or tokens[2] == "NDATA") :
+        if tokens[0] == "spBv1.0"  :
             for pointSpb in self._pointsSpb:
-                self.manageSpb(message, pointSpb)
+                if pointSpb["groupId"] == tokens[1] and pointSpb["nodeName"] == tokens[3]:
+                    self.manageSpb(message, pointSpb)
         else:
             for point in self._points:
                 self.manageStdMqtt(message, point)
 
-    # path: /area/eqpt_id/1_INFORMATIONS/2_VALUE_CHAIN/4_OPERATION_RESPONSE/1_ACTUAL_OUTPUT/1_GOODS
-    # path: /area/eqpt_id/4_BEHAVIORS/2_STATES
+    # path: /area/3_STRUCTURE/Equipments/eqpt_id/1_INFORMATIONS/2_VALUE_CHAIN/4_OPERATION_RESPONSE/1_ACTUAL_OUTPUT/1_GOODS
+    # path: /area/3_STRUCTURE/Equipments/eqpt_id/4_BEHAVIORS/2_STATES
 
     # target:   /area/equipments
     #           /area/it
@@ -133,8 +134,9 @@ class Mqtt2InfluxDB:
     def manageSpb(self, message, point):
         inboundPayload = sparkplug_b_pb2.Payload()
         inboundPayload.ParseFromString(message.payload)
-
+        
         for metric in inboundPayload.metrics:
+            print(message.topic + '/' + metric.name)
             tokens = metric.name.split("/")
 
             p = Point(tokens[-1])
@@ -143,14 +145,19 @@ class Mqtt2InfluxDB:
 
             p.tag("site", point["groupId"])
             p.tag("area", point["nodeName"])
-            p.tag("equipment", tokens[0])
+            if len(tokens) < 2:
+                return
+            p.tag("equipment", tokens[1])
 
-            for i in range(1, len(tokens) - 1):
+            for i in range(2, len(tokens) - 1):
                 p.tag("lvl" + str(i), tokens[i])            
 
             line_protocol = p.to_line_protocol()
             print(line_protocol)
-            self._write_api.write(bucket=self._bucket, record=p)         
+            try:
+                self._write_api.write(bucket=self._bucket, record=p)
+            except Exception as e:
+                logging.error("Write Influx failed %s", e)
 
 
     def manageStdMqtt(self, message, point):
