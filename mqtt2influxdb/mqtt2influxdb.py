@@ -134,23 +134,51 @@ class Mqtt2InfluxDB:
     def manageSpb(self, message, point):
         inboundPayload = sparkplug_b_pb2.Payload()
         inboundPayload.ParseFromString(message.payload)
+
+        
         
         for metric in inboundPayload.metrics:
-            print(message.topic + '/' + metric.name)
             tokens = metric.name.split("/")
+            payload_json = 0
+            payload = 0
 
-            p = Point(tokens[-1])
-            p.time(metric.timestamp, WritePrecision.MS)
-            p.field("value", getMetricValue(metric))
+            # Detect JSON payload
+            if metric.datatype == 12 and len(metric.string_value) > 0 and metric.string_value[0] == '{':
+                payload_json = 1
+
+                    
+            
+            if payload_json == 1:
+                try:
+                    payload = json.loads(metric.string_value)
+                except Exception as e:
+                    logging.error('parse json: %s topic: %s payload: %s', e, metric.name, metric.string_value)
+                    continue
+                p = Point(payload["name"])
+
+                for k, v in payload["fields"].items():
+                    p.field(k, v)
+                for k, v in payload["tags"].items():
+                    p.tag(k, v)
+            else:
+                try:
+                    p = Point(tokens[-1])
+                except Exception as e:
+                    logging.error('exception: %s topic: %s payload: %s', e, metric.name, metric.string_value)
+
+                p.time(metric.timestamp, WritePrecision.MS)
+                p.field("value", getMetricValue(metric))
+                if len(tokens) < 2:
+                    return
+                for i in range(2, len(tokens) - 1):
+                    p.tag("lvl" + str(i), tokens[i])     
+
+            if (tokens[0] == "Equipments"):
+                p.tag("equipment", tokens[1])
 
             p.tag("site", point["groupId"])
             p.tag("area", point["nodeName"])
-            if len(tokens) < 2:
-                return
-            p.tag("equipment", tokens[1])
-
-            for i in range(2, len(tokens) - 1):
-                p.tag("lvl" + str(i), tokens[i])            
+       
 
             line_protocol = p.to_line_protocol()
             print(line_protocol)
