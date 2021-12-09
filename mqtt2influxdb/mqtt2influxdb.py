@@ -33,7 +33,9 @@ class Mqtt2InfluxDB:
         self._points = None
         if 'points' in config:
             self._points = config['points']
-        self._pointsSpb = config['pointsSpb']
+        self._pointsSpb = None
+        if 'pointsSpb' in config:
+            self._pointsSpb = config['pointsSpb']
         self._config = config
 
         self._influxdb = influxdb.InfluxDBClient(config['influxdb']['host'],
@@ -97,13 +99,14 @@ class Mqtt2InfluxDB:
                 for point in self._points:
                     logging.info('subscribe %s', point['topic'])
                     client.subscribe(point['topic'])
-            for pointSpb in self._pointsSpb:
-                topicNode = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
-                topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
-                logging.info('subscribe Spb %s', topicNode)
-                client.subscribe(topicNode)
-                logging.info('subscribe Spb %s', topicDevice)
-                client.subscribe(topicDevice)
+            if self._pointsSpb:
+                for pointSpb in self._pointsSpb:
+                    topicNode = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
+                    topicDevice = "spBv1.0/" + pointSpb["groupId"] + "/+/" + pointSpb["nodeName"] + "/#"
+                    logging.info('subscribe Spb %s', topicNode)
+                    client.subscribe(topicNode)
+                    logging.info('subscribe Spb %s', topicDevice)
+                    client.subscribe(topicDevice)
 
     def _on_mqtt_disconnect(self, client, userdata, rc):
         logging.info('Disconnect from MQTT broker with code %s', rc)
@@ -200,11 +203,11 @@ class Mqtt2InfluxDB:
 
                     if payload == '':
                         payload = 'null'
-                    # try:
-                    #     payload = json.loads(payload)
-                    # except Exception as e:
-                    #     logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
-                    #     return
+                    try:
+                        payload = json.loads(payload)
+                    except Exception as e:
+                        logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
+                        return
 
                     if point['type'] == 'float':
                         payload = float(payload)
@@ -225,25 +228,27 @@ class Mqtt2InfluxDB:
                         logging.info('Skipping %s due to schedule %s' % (message.topic, point['schedule']))
                         continue
 
-                if payload == '':
-                    payload = 'null'
-                try:
-                    payload = json.loads(payload)
-                except Exception as e:
-                    logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
-                    return
+                # if payload == '':
+                #     payload = 'null'
+                # try:
+                #     payload = json.loads(payload)
+                # except Exception as e:
+                #     logging.error('parse json: %s topic: %s payload: %s', e, message.topic, message.payload)
+                #     return
 
-                record = {'measurement': measurement,
-                          'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
-                          'tags': {},
-                          'fields': {}}
+                # record = {'measurement': measurement,
+                #           'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),
+                #           'tags': {},
+                #           'fields': {}}
                 
-                p = Point(measurement)
+                
 
             measurement = self._get_value_from_str_or_JSONPath(point['measurement'], msg)
             if measurement is None:
                 logging.warning('unknown measurement')
                 return
+
+            p = Point(measurement)
 
             record = {'measurement': measurement,
                         'time': datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'),

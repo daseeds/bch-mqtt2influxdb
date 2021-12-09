@@ -94,7 +94,7 @@ schema = Schema({
     Optional('points'): [{
         'measurement': And(str, len, Use(str_or_jsonPath)),
         'topic': And(str, len),
-        Optional('type'): And(str, len),
+        'type': And(str, len),
         Optional('schedule'): And(str, len, valid_pycron_expr),
         Optional('httpcontent'): {str: And(str, len, Use(str_or_jsonPath))},
         Optional('fields'): Or(
@@ -105,7 +105,7 @@ schema = Schema({
         Optional('tags'): {str: And(str, len, Use(str_or_jsonPath))},
         Optional('database'): And(str, len)
     }],
-    'pointsSpb': [{
+    Optional('pointsSpb'): [{
         'groupId' : And(str, len),
         'nodeName' : And(str, len)
     }]
